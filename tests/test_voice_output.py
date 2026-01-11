@@ -6,13 +6,8 @@ Tests text-to-speech synthesis, audio playback, and caching
 import pytest
 import numpy as np
 import io
-import sys
 from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock, AsyncMock, mock_open
-
-# Mock pydub before importing voice_output (Python 3.14 compatibility)
-sys.modules['pydub'] = MagicMock()
-sys.modules['pydub.AudioSegment'] = MagicMock()
 
 from src.voice_output import VoiceOutput
 

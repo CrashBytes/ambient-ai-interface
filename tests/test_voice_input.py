@@ -514,7 +514,7 @@ class TestSimpleWakeWordDetector:
         """Test wake word detection timeout"""
         test_config.enable_wake_word = True
         
-        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+        with patch('src.voice_input.OpenAI'), patch('src.voice_input.AsyncOpenAI'):
             with patch('src.voice_input.SimpleWakeWordDetector') as mock_detector_class:
                 mock_detector = Mock()
                 mock_detector_class.return_value = mock_detector
@@ -522,13 +522,18 @@ class TestSimpleWakeWordDetector:
                 
                 voice_input = VoiceInput(test_config)
                 
-                # Mock time and capture_audio
+                # Mock time and capture_audio with enough iterations to prevent StopIteration
                 with patch('asyncio.get_event_loop') as mock_loop:
-                    mock_loop.return_value.time.side_effect = [0.0, 0.5, 1.0, 5.5]  # Simulate timeout
+                    # Provide enough time values to cover multiple loop iterations
+                    time_values = [0.0] + [i * 0.5 for i in range(1, 20)]  # 0.0, 0.5, 1.0, 1.5, ... 9.5
+                    mock_loop.return_value.time.side_effect = time_values
+                    
                     with patch.object(voice_input, 'capture_audio', return_value=sample_audio_chunk):
                         result = voice_input.wait_for_wake_word(timeout=5.0)
                         
                         assert result is False
+                        # Verify capture_audio was called multiple times before timeout
+                        assert voice_input.capture_audio.call_count > 0
     
     @pytest.mark.asyncio
     async def test_wait_for_wake_word_async(self, test_config, mock_sounddevice):

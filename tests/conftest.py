@@ -5,9 +5,31 @@ Pytest configuration and fixtures for ambient-ai-interface tests
 import os
 import sys
 import gc
+import signal
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 import pytest
+
+
+def pytest_configure(config):
+    """
+    Pytest hook that runs BEFORE test collection.
+    This is the earliest point where we can mock modules.
+    """
+    # Mock audio libraries to prevent hardware access
+    mock_sd = MagicMock()
+    mock_sd.query_devices.return_value = []
+    mock_sd.sleep = MagicMock()
+    mock_sd.wait = MagicMock()
+    mock_sd.rec = MagicMock(return_value=MagicMock())
+    mock_sd.play = MagicMock()
+    mock_sd.InputStream = MagicMock()
+    
+    sys.modules['sounddevice'] = mock_sd
+    sys.modules['pydub'] = MagicMock()
+    sys.modules['pydub.AudioSegment'] = MagicMock()
+
+
 import numpy as np
 
 # Add src to path
@@ -15,10 +37,22 @@ src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
 
 
+def timeout_handler(signum, frame):
+    """Handler for test timeout"""
+    raise TimeoutError("Test exceeded 30 second timeout - possible infinite loop or memory leak")
+
+
 @pytest.fixture(autouse=True)
-def cleanup_after_test():
-    """Automatically cleanup after each test to prevent memory leaks"""
+def test_timeout_and_cleanup():
+    """Add timeout protection and cleanup after each test to prevent memory leaks and infinite loops"""
+    # Set 30 second timeout per test
+    signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(30)
+    
     yield
+    
+    # Disable timeout
+    signal.alarm(0)
     # Force garbage collection after each test
     gc.collect()
 
