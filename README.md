@@ -1,5 +1,8 @@
 # Building Ambient AI: Voice-First Screenless Interface Tutorial
 
+[![Tests](https://github.com/CrashBytes/ambient-ai-interface/workflows/Tests/badge.svg)](https://github.com/CrashBytes/ambient-ai-interface/actions)
+[![codecov](https://codecov.io/gh/CrashBytes/ambient-ai-interface/branch/main/graph/badge.svg)](https://codecov.io/gh/CrashBytes/ambient-ai-interface)
+
 A comprehensive, production-ready implementation of voice-first ambient AI interfaces that eliminate traditional screens. This tutorial accompanies the CrashBytes article: ["Building Ambient AI: The Complete Tutorial for Voice-First, Screenless Interfaces That Replace Traditional UIs"](https://crashbytes.com/articles/tutorial-ambient-ai-voice-first-interfaces-screenless-computing-2025).
 
 ## What You'll Build
