@@ -314,7 +314,8 @@ class ContextManager:
                 "user_messages": 0,
                 "assistant_messages": 0,
                 "oldest_message": None,
-                "newest_message": None
+                "newest_message": None,
+                "preferences_count": len(self.user_preferences)
             }
         
         user_count = sum(1 for msg in self.conversation_history if msg["role"] == "user")

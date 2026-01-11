@@ -217,18 +217,29 @@ Be helpful, friendly, and efficient!"""
         """
         actions = []
         
-        # Look for ACTION: markers in response
-        action_pattern = r'ACTION:\s*(\{[^}]+\})'
-        matches = re.findall(action_pattern, response_text)
+        # Find all ACTION: markers
+        action_starts = [m.start() for m in re.finditer(r'ACTION:\s*\{', response_text)]
         
-        for match in matches:
-            try:
-                # Parse JSON action
-                action = json.loads(match)
-                actions.append(action)
-                logger.info(f"Extracted action: {action}")
-            except json.JSONDecodeError as e:
-                logger.warning(f"Failed to parse action: {match} ({e})")
+        for start_pos in action_starts:
+            # Find the matching closing brace by counting braces
+            brace_count = 0
+            json_start = response_text.find('{', start_pos)
+            
+            for i in range(json_start, len(response_text)):
+                if response_text[i] == '{':
+                    brace_count += 1
+                elif response_text[i] == '}':
+                    brace_count -= 1
+                    if brace_count == 0:
+                        # Found matching close brace
+                        json_str = response_text[json_start:i+1]
+                        try:
+                            action = json.loads(json_str)
+                            actions.append(action)
+                            logger.info(f"Extracted action: {action}")
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Failed to parse action: {json_str} ({e})")
+                        break
         
         return actions
     
