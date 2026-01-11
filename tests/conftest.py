@@ -4,6 +4,7 @@ Pytest configuration and fixtures for ambient-ai-interface tests
 
 import os
 import sys
+import gc
 from pathlib import Path
 from unittest.mock import Mock, MagicMock, AsyncMock, patch
 import pytest
@@ -12,6 +13,14 @@ import numpy as np
 # Add src to path
 src_path = Path(__file__).parent.parent / "src"
 sys.path.insert(0, str(src_path))
+
+
+@pytest.fixture(autouse=True)
+def cleanup_after_test():
+    """Automatically cleanup after each test to prevent memory leaks"""
+    yield
+    # Force garbage collection after each test
+    gc.collect()
 
 # Set test environment variables before importing modules
 os.environ.setdefault("OPENAI_API_KEY", "test-key-12345")
@@ -115,10 +124,9 @@ def temp_db_path(tmp_path):
 
 @pytest.fixture
 def sample_audio_data():
-    """Sample audio data for testing"""
-    import numpy as np
-    # Generate 1 second of silence at 16kHz
-    duration = 1.0
+    """Sample audio data for testing (small size to prevent memory issues)"""
+    # Generate 0.1 second of silence at 16kHz (reduced from 1 second)
+    duration = 0.1
     sample_rate = 16000
     samples = int(duration * sample_rate)
     return np.zeros(samples, dtype=np.float32)

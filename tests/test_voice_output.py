@@ -35,11 +35,10 @@ def mock_sounddevice():
 def mock_audio_segment():
     """Mock AudioSegment"""
     with patch('src.voice_output.AudioSegment') as mock_segment:
-        # Create mock audio object
+        # Create mock audio object with small data to prevent memory issues
         mock_audio = Mock()
-        mock_audio.get_array_of_samples.return_value = np.random.randint(
-            -32768, 32767, 16000, dtype=np.int16
-        )
+        # Use small array: 1000 samples instead of 16000
+        mock_audio.get_array_of_samples.return_value = np.zeros(1000, dtype=np.int16)
         mock_audio.sample_width = 2  # 16-bit
         mock_audio.channels = 1  # Mono
         mock_segment.from_mp3.return_value = mock_audio
@@ -48,8 +47,9 @@ def mock_audio_segment():
 
 @pytest.fixture
 def sample_mp3_bytes():
-    """Generate sample MP3 bytes"""
-    return b'fake_mp3_data' * 1000
+    """Generate small sample MP3 bytes (reduced size)"""
+    # Use smaller fake data to prevent memory issues
+    return b'fake_mp3_data' * 100  # Was 1000, now 100
 
 
 class TestVoiceOutput:
@@ -348,3 +348,294 @@ class TestVoiceOutput:
             voice_output.cleanup()
             
             assert len(voice_output.audio_cache) == 0
+    @pytest.mark.asyncio
+    async def test_speak_async_with_cache_hit(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test async speak with cache hit"""
+        test_config.enable_caching = True
+        
+        with patch('src.voice_output.OpenAI') as mock_openai, patch('src.voice_output.AsyncOpenAI'):
+            mock_client = Mock()
+            mock_openai.return_value = mock_client
+            mock_response = Mock()
+            mock_response.content = sample_mp3_bytes
+            mock_client.audio.speech.create.return_value = mock_response
+            
+            voice_output = VoiceOutput(test_config)
+            
+            # First call to populate cache
+            await voice_output.speak_async("Cached phrase", use_cache=True)
+            
+            # Second call should hit cache
+            mock_client.audio.speech.create.reset_mock()
+            await voice_output.speak_async("Cached phrase", use_cache=True)
+            
+            # Should not have called TTS again
+            mock_client.audio.speech.create.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_speak_async_with_caching_disabled(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test async speak with caching disabled"""
+        test_config.enable_caching = False
+        
+        with patch('src.voice_output.OpenAI'), patch('src.voice_output.AsyncOpenAI') as mock_async_openai:
+            mock_client = AsyncMock()
+            mock_async_openai.return_value = mock_client
+            mock_response = Mock()
+            mock_response.content = sample_mp3_bytes
+            mock_client.audio.speech.create.return_value = mock_response
+            
+            voice_output = VoiceOutput(test_config)
+            
+            await voice_output.speak_async("Test", use_cache=True)
+            
+            # Cache should be empty (caching disabled)
+            assert len(voice_output.audio_cache) == 0
+    
+    @pytest.mark.asyncio
+    async def test_speak_async_error_handling(self, test_config, mock_sounddevice, mock_audio_segment):
+        """Test async speak error handling"""
+        with patch('src.voice_output.OpenAI'), patch('src.voice_output.AsyncOpenAI') as mock_async_openai:
+            mock_client = AsyncMock()
+            mock_async_openai.return_value = mock_client
+            mock_client.audio.speech.create.side_effect = Exception("TTS API Error")
+            
+            voice_output = VoiceOutput(test_config)
+            
+            # Should not raise exception
+            await voice_output.speak_async("Error test", use_cache=False)
+    
+    @pytest.mark.asyncio
+    async def test_generate_speech_async_error(self, test_config, mock_sounddevice, mock_audio_segment):
+        """Test _generate_speech_async error handling"""
+        with patch('src.voice_output.OpenAI'), patch('src.voice_output.AsyncOpenAI') as mock_async_openai:
+            mock_client = AsyncMock()
+            mock_async_openai.return_value = mock_client
+            mock_client.audio.speech.create.side_effect = Exception("API Error")
+            
+            voice_output = VoiceOutput(test_config)
+            
+            # Should raise exception
+            with pytest.raises(Exception, match="API Error"):
+                await voice_output._generate_speech_async("Test")
+    
+    def test_play_audio_error(self, test_config, mock_sounddevice):
+        """Test _play_audio error handling"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_output = VoiceOutput(test_config)
+            
+            # Mock play to raise exception
+            mock_sounddevice.play.side_effect = Exception("Playback error")
+            
+            audio_data = np.zeros(1000, dtype=np.float32)
+            
+            # Should raise exception
+            with pytest.raises(Exception, match="Playback error"):
+                voice_output._play_audio(audio_data)
+    
+    @pytest.mark.asyncio
+    async def test_play_audio_async(self, test_config, mock_sounddevice):
+        """Test async audio playback"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_output = VoiceOutput(test_config)
+            
+            audio_data = np.zeros(1000, dtype=np.float32)
+            
+            await voice_output._play_audio_async(audio_data)
+            
+            mock_sounddevice.play.assert_called_once()
+    
+    def test_play_chime_unknown_type(self, test_config, mock_sounddevice):
+        """Test playing chime with unknown type (uses default)"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_output = VoiceOutput(test_config)
+            
+            # Unknown chime type should use default (wake)
+            voice_output.play_chime("unknown_type")
+            
+            mock_sounddevice.play.assert_called_once()
+            # Check that audio data was generated
+            call_args = mock_sounddevice.play.call_args
+            assert isinstance(call_args[0][0], np.ndarray)
+    
+    def test_preload_phrases_with_error(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test preload_phrases with one phrase failing"""
+        with patch('src.voice_output.OpenAI') as mock_openai, patch('src.voice_output.AsyncOpenAI'):
+            mock_client = Mock()
+            mock_openai.return_value = mock_client
+            mock_response = Mock()
+            mock_response.content = sample_mp3_bytes
+            
+            # First call succeeds, second fails, third succeeds
+            mock_client.audio.speech.create.side_effect = [
+                mock_response,
+                Exception("TTS Error"),
+                mock_response
+            ]
+            
+            voice_output = VoiceOutput(test_config)
+            
+            phrases = ["Success 1", "Will Fail", "Success 2"]
+            voice_output.preload_phrases(phrases)
+            
+            # Should have 2 phrases cached (1 failed)
+            assert len(voice_output.audio_cache) == 2
+    
+    @pytest.mark.asyncio
+    async def test_preload_phrases_async_error(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test async preload with error"""
+        with patch('src.voice_output.OpenAI') as mock_openai, patch('src.voice_output.AsyncOpenAI'):
+            mock_client = Mock()
+            mock_openai.return_value = mock_client
+            mock_client.audio.speech.create.side_effect = Exception("TTS Error")
+            
+            voice_output = VoiceOutput(test_config)
+            
+            await voice_output.preload_phrases_async(["Error phrase"])
+            
+            # Cache should be empty (all failed)
+            assert len(voice_output.audio_cache) == 0
+    
+    def test_mp3_to_numpy_8bit(self, test_config, mock_sounddevice):
+        """Test MP3 to numpy conversion - 8-bit audio"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            with patch('src.voice_output.AudioSegment') as mock_segment:
+                mock_audio = Mock()
+                mock_audio.get_array_of_samples.return_value = np.array([100, 200, 50])
+                mock_audio.sample_width = 1  # 8-bit
+                mock_audio.channels = 1
+                mock_segment.from_mp3.return_value = mock_audio
+                
+                voice_output = VoiceOutput(test_config)
+                audio_data = voice_output._mp3_to_numpy(b'fake_mp3')
+                
+                assert isinstance(audio_data, np.ndarray)
+                # 8-bit should be normalized by 128
+                assert len(audio_data) == 3
+    
+    def test_mp3_to_numpy_32bit(self, test_config, mock_sounddevice):
+        """Test MP3 to numpy conversion - 32-bit audio"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            with patch('src.voice_output.AudioSegment') as mock_segment:
+                mock_audio = Mock()
+                mock_audio.get_array_of_samples.return_value = np.array([1000000, 2000000])
+                mock_audio.sample_width = 4  # 32-bit
+                mock_audio.channels = 1
+                mock_segment.from_mp3.return_value = mock_audio
+                
+                voice_output = VoiceOutput(test_config)
+                audio_data = voice_output._mp3_to_numpy(b'fake_mp3')
+                
+                assert isinstance(audio_data, np.ndarray)
+                # 32-bit should be normalized by 2147483648
+                assert len(audio_data) == 2
+    def test_speak_caching_disabled(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test speech with caching disabled in config"""
+        test_config.enable_caching = False
+        
+        with patch('src.voice_output.OpenAI') as mock_openai, patch('src.voice_output.AsyncOpenAI'):
+            mock_client = Mock()
+            mock_openai.return_value = mock_client
+            mock_response = Mock()
+            mock_response.content = sample_mp3_bytes
+            mock_client.audio.speech.create.return_value = mock_response
+            
+            voice_output = VoiceOutput(test_config)
+            
+            # First call should generate speech
+            voice_output.speak("Test phrase", use_cache=True)
+            assert mock_client.audio.speech.create.call_count == 1
+            
+            # Second call should also generate (caching disabled)
+            voice_output.speak("Test phrase", use_cache=True)
+            assert mock_client.audio.speech.create.call_count == 2  # Called again
+            
+            # Cache should be empty
+            assert len(voice_output.audio_cache) == 0
+    
+    @pytest.mark.asyncio
+    async def test_speak_async_caching_disabled(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test async speech with caching disabled"""
+        test_config.enable_caching = False
+        
+        with patch('src.voice_output.OpenAI'), patch('src.voice_output.AsyncOpenAI') as mock_async_openai:
+            mock_client = AsyncMock()
+            mock_async_openai.return_value = mock_client
+            mock_response = Mock()
+            mock_response.content = sample_mp3_bytes
+            mock_client.audio.speech.create.return_value = mock_response
+            
+            voice_output = VoiceOutput(test_config)
+            
+            await voice_output.speak_async("Test", use_cache=True)
+            
+            # Cache should be empty since caching disabled
+            assert len(voice_output.audio_cache) == 0
+    
+    def test_play_audio_error(self, test_config, mock_sounddevice):
+        """Test audio playback error handling"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_output = VoiceOutput(test_config)
+            
+            # Make play raise an exception
+            mock_sounddevice.play.side_effect = Exception("Playback failed")
+            
+            audio_data = np.array([0.1, 0.2, 0.3])
+            
+            with pytest.raises(Exception, match="Playback failed"):
+                voice_output._play_audio(audio_data)
+    
+    def test_preload_phrases_with_failure(self, test_config, mock_sounddevice, mock_audio_segment, sample_mp3_bytes):
+        """Test preload phrases with some failures"""
+        with patch('src.voice_output.OpenAI') as mock_openai, patch('src.voice_output.AsyncOpenAI'):
+            mock_client = Mock()
+            mock_openai.return_value = mock_client
+            
+            # Make first call succeed, second fail, third succeed
+            mock_response_success = Mock()
+            mock_response_success.content = sample_mp3_bytes
+            
+            mock_client.audio.speech.create.side_effect = [
+                mock_response_success,  # Success
+                Exception("TTS failed"),  # Failure
+                mock_response_success,  # Success
+            ]
+            
+            voice_output = VoiceOutput(test_config)
+            
+            phrases = ["Success 1", "Failure", "Success 2"]
+            voice_output.preload_phrases(phrases)
+            
+            # Should have cached 2 successful phrases
+            assert len(voice_output.audio_cache) == 2
+    
+    def test_mp3_to_numpy_8bit(self, test_config, mock_sounddevice):
+        """Test MP3 conversion with 8-bit audio"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            with patch('src.voice_output.AudioSegment') as mock_segment:
+                mock_audio = Mock()
+                mock_audio.get_array_of_samples.return_value = np.array([100, 200, 50], dtype=np.int8)
+                mock_audio.sample_width = 1  # 8-bit
+                mock_audio.channels = 1
+                mock_segment.from_mp3.return_value = mock_audio
+                
+                voice_output = VoiceOutput(test_config)
+                audio_data = voice_output._mp3_to_numpy(b'fake_mp3')
+                
+                assert isinstance(audio_data, np.ndarray)
+                assert len(audio_data) == 3
+    
+    def test_mp3_to_numpy_32bit(self, test_config, mock_sounddevice):
+        """Test MP3 conversion with 32-bit audio"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            with patch('src.voice_output.AudioSegment') as mock_segment:
+                mock_audio = Mock()
+                mock_audio.get_array_of_samples.return_value = np.array([1000, 2000, 3000], dtype=np.int32)
+                mock_audio.sample_width = 4  # 32-bit
+                mock_audio.channels = 1
+                mock_segment.from_mp3.return_value = mock_audio
+                
+                voice_output = VoiceOutput(test_config)
+                audio_data = voice_output._mp3_to_numpy(b'fake_mp3')
+                
+                assert isinstance(audio_data, np.ndarray)
+                assert len(audio_data) == 3
