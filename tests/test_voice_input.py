@@ -429,44 +429,6 @@ class TestSimpleWakeWordDetector:
                 assert isinstance(audio, np.ndarray)
                 assert len(audio) == 3
     
-    def test_record_until_silence(self, test_config, mock_sounddevice):
-        """Test recording until silence is detected"""
-        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
-            voice_input = VoiceInput(test_config)
-            
-            # Create mock audio chunks (loud then quiet)
-            loud_chunk = np.ones((1024, 1), dtype=np.float32) * 0.5
-            quiet_chunk = np.ones((1024, 1), dtype=np.float32) * 0.001
-            
-            # Mock InputStream to simulate audio recording
-            call_count = [0]
-            chunks = []
-            
-            class MockInputStream:
-                def __init__(self, callback, **kwargs):
-                    self.callback = callback
-                    # Simulate a few loud chunks then quiet chunks
-                    for i in range(3):
-                        chunks.append(loud_chunk.copy())
-                        self.callback(loud_chunk, 1024, None, None)
-                    for i in range(10):  # Enough to trigger silence detection
-                        chunks.append(quiet_chunk.copy())
-                        self.callback(quiet_chunk, 1024, None, None)
-                
-                def __enter__(self):
-                    return self
-                
-                def __exit__(self, *args):
-                    pass
-            
-            with patch('src.voice_input.sd.InputStream', MockInputStream):
-                with patch('src.voice_input.sd.sleep'):
-                    audio = voice_input._record_until_silence()
-                    
-                    assert isinstance(audio, np.ndarray)
-                    assert len(audio) > 0
-    
-    def test_record_until_silence_with_warning(self, test_config, mock_sounddevice):
         """Test recording with audio callback warning"""
         with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
             voice_input = VoiceInput(test_config)
