@@ -213,3 +213,107 @@ class TestSimpleWakeWordDetector:
         """Test cleanup"""
         detector = SimpleWakeWordDetector("test")
         detector.cleanup()
+
+
+
+class TestVoiceInputEdgeCases:
+    """Test edge cases and error paths"""
+    
+    def test_init_wake_word_detector_exception(self, test_config, mock_sounddevice):
+        """Test wake word detector initialization failure"""
+        test_config.enable_wake_word = True
+        test_config.wake_word = "test wake word"
+        
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            with patch('src.voice_input.SimpleWakeWordDetector', side_effect=Exception("Init failed")):
+                voice_input = VoiceInput(test_config)
+                
+                # Should handle exception gracefully
+                assert voice_input.wake_word_detector is None
+    
+    def test_is_ready_exception(self, test_config):
+        """Test is_ready handles exceptions"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            with patch('src.voice_input.sd.query_devices', side_effect=Exception("Device error")):
+                voice_input = VoiceInput(test_config)
+                
+                assert voice_input.is_ready() is False
+    
+    def test_capture_audio_until_silence_via_none_duration(self, test_config, mock_sounddevice):
+        """Test capture_audio with duration=None triggers _record_until_silence"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_input = VoiceInput(test_config)
+            
+            # Mock _record_until_silence
+            with patch.object(voice_input, '_record_until_silence', return_value=np.array([1, 2, 3])):
+                audio = voice_input.capture_audio(duration=None)
+                
+                assert isinstance(audio, np.ndarray)
+                assert len(audio) == 3
+    
+    def test_record_until_silence_implementation(self, test_config, mock_sounddevice):
+        """Test _record_until_silence with mocked callback"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_input = VoiceInput(test_config)
+            
+            # Create silent audio chunks
+            silent_chunk = np.zeros((1024, 1), dtype=np.float32)
+            callback_count = [0]  # Use list to allow modification in nested function
+            stored_callback = [None]
+            
+            # Mock InputStream to store callback for later execution
+            class MockInputStream:
+                def __init__(self, callback, **kwargs):
+                    stored_callback[0] = callback
+                
+                def __enter__(self):
+                    return self
+                
+                def __exit__(self, *args):
+                    pass
+            
+            # Mock sleep to trigger callbacks during the loop
+            def mock_sleep(ms):
+                if stored_callback[0] and callback_count[0] < 40:
+                    # Trigger callback with silent audio
+                    stored_callback[0](silent_chunk, 1024, None, None)
+                    callback_count[0] += 1
+            
+            with patch('src.voice_input.sd.InputStream', MockInputStream):
+                with patch('src.voice_input.sd.sleep', side_effect=mock_sleep):
+                    audio = voice_input._record_until_silence()
+                    
+                    assert isinstance(audio, np.ndarray)
+                    assert len(audio) > 0  # Should have captured some audio
+    
+    def test_record_until_silence_with_audio_warnings(self, test_config, mock_sounddevice):
+        """Test _record_until_silence handles audio callback warnings"""
+        with patch('openai.OpenAI'), patch('openai.AsyncOpenAI'):
+            voice_input = VoiceInput(test_config)
+            
+            quiet_chunk = np.ones((1024, 1), dtype=np.float32) * 0.001
+            callback_count = [0]
+            stored_callback = [None]
+            
+            class MockInputStream:
+                def __init__(self, callback, **kwargs):
+                    stored_callback[0] = callback
+                
+                def __enter__(self):
+                    return self
+                
+                def __exit__(self, *args):
+                    pass
+            
+            # Mock sleep to trigger callbacks with warnings during the loop
+            def mock_sleep(ms):
+                if stored_callback[0] and callback_count[0] < 40:
+                    # Trigger callback with status warning
+                    stored_callback[0](quiet_chunk, 1024, None, "Input overflow")
+                    callback_count[0] += 1
+            
+            with patch('src.voice_input.sd.InputStream', MockInputStream):
+                with patch('src.voice_input.sd.sleep', side_effect=mock_sleep):
+                    audio = voice_input._record_until_silence()
+                    assert isinstance(audio, np.ndarray)
+                    assert len(audio) > 0  # Should have captured audio despite warnings
