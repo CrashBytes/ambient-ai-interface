@@ -5,7 +5,7 @@ sounddevice>=0.4.6
 pydub>=0.25.1
 
 # Configuration Management
-python-dotenv>=1.0.0
+python-dotenv>=1.2.2
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
