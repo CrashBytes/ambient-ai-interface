@@ -1,7 +1,7 @@
 # Core Dependencies - Actually Used in Code
 openai>=3.1.0
 numpy>=2.5.2
-sounddevice>=0.5.5
+sounddevice>=0.5.6
 pydub>=0.25.1
 
 # Configuration Management
