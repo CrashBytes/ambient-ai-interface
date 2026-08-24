@@ -1,5 +1,5 @@
 # Core Dependencies - Actually Used in Code
-openai>=3.1.0
+openai>=3.3.1
 numpy>=2.5.2
 sounddevice>=0.5.5
 pydub>=0.25.1
