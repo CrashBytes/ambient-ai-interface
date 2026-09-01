@@ -1,12 +1,12 @@
 # Core Dependencies - Actually Used in Code
 openai>=3.1.0
 numpy>=2.5.2
-sounddevice>=0.5.5
+sounddevice>=0.5.6
 pydub>=0.25.1
 
 # Configuration Management
-python-dotenv>=1.2.2
-pydantic>=2.13.4
+python-dotenv>=1.2.3
+pydantic>=2.13.5
 pydantic-settings>=2.15.0
 
 # Logging
@@ -22,5 +22,5 @@ pytest-mock>=3.15.1
 # Code Quality
 black>=26.5.1
 flake8>=7.3.0
-mypy>=2.3.0
-isort>=8.0.1
+mypy>=2.3.1
+isort>=9.0.1
